@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tank Game</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        
+        // Set canvas size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let tank = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            width: 50,
+            height: 50,
+            speed: 5,
+            color: 'green',
+            health: 100,
+            direction: 0,
+            turretAngle: 0,
+            shootCooldown: 0, // Cooldown for shooting
+            turretLength: 20,
+            rotationSpeed: 0.05,
+            armor: 0,
+        };
+
+        let bullets = [];
+        let enemies = [];
+        let explosions = [];
+
+        let lastUpdateTime = Date.now();
+
+        let currentLevel = 1;
+        let levelEnemyCount = 2;
+        let bossLevelInterval = 10;
+
+        let levelComplete = false;
+
+        let coins = 0;
+        let storedCoins = localStorage.getItem('coins');
+
+        if (storedCoins) {
+            coins = parseInt(storedCoins);
+        }
+
+        let gameState = "menu"; // Start the game in the main menu
+        let upgradeState = "none";
+
+        let tankUpgrades = {
+            speed: 5,
+            health: 100,
+            damage: 100,
+        };
+
+        let keys = { left: false, up: false, right: false, down: false, shoot: false };
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowLeft") keys.left = true;
+            if (e.key === "ArrowUp") keys.up = true;
+            if (e.key === "ArrowRight") keys.right = true;
+            if (e.key === "ArrowDown") keys.down = true;
+            if (e.key === " ") keys.shoot = true;
+        });
+
+        document.addEventListener("keyup", (e) => {
+            if (e.key === "ArrowLeft") keys.left = false;
+            if (e.key === "ArrowUp") keys.up = false;
+            if (e.key === "ArrowRight") keys.right = false;
+            if (e.key === "ArrowDown") keys.down = false;
+            if (e.key === " ") keys.shoot = false;
+        });
+
+        function updateTank() {
+            if (keys.left) tank.x -= tank.speed;
+            if (keys.up) tank.y -= tank.speed;
+            if (keys.right) tank.x += tank.speed;
+            if (keys.down) tank.y += tank.speed;
+
+            if (keys.right) tank.turretAngle += tank.rotationSpeed;
+            if (keys.left) tank.turretAngle -= tank.rotationSpeed;
+
+            tank.x = Math.max(0, Math.min(tank.x, canvas.width - tank.width));
+            tank.y = Math.max(0, Math.min(tank.y, canvas.height - tank.height));
+
+            if (tank.shootCooldown > 0) {
+                tank.shootCooldown--;
+            }
+        }
+
+        function shootBullet() {
+            if (keys.shoot && tank.shootCooldown <= 0) {
+                let bullet = {
+                    x: tank.x + tank.width / 2,
+                    y: tank.y + tank.height / 2,
+                    radius: 5,
+                    speed: 7,
+                    angle: tank.turretAngle,
+                    damage: tankUpgrades.damage,
+                };
+                bullets.push(bullet);
+                tank.shootCooldown = 60; // Set the cooldown (60 frames = ~1 second at 60fps)
+            }
+        }
+
+        function drawTank() {
+            ctx.save();
+            ctx.translate(tank.x + tank.width / 2, tank.y + tank.height / 2);
+            ctx.rotate(tank.turretAngle);
+
+            ctx.fillStyle = tank.color;
+            ctx.fillRect(-tank.width / 2, -tank.height / 2, tank.width, tank.height);
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, -5, tank.turretLength, 10);
+
+            ctx.restore();
+        }
+
+        function updateBullets() {
+            for (let i = 0; i < bullets.length; i++) {
+                let bullet = bullets[i];
+                bullet.x += Math.cos(bullet.angle) * bullet.speed;
+                bullet.y += Math.sin(bullet.angle) * bullet.speed;
+
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+                ctx.fillStyle = 'black';
+                ctx.fill();
+                ctx.closePath();
+
+                if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                    bullets.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+
+        function createEnemies() {
+            if (enemies.length === 0 && !levelComplete) {
+                for (let i = 0; i < levelEnemyCount; i++) {
+                    let enemy = {
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        width: 50,
+                        height: 50,
+                        speed: 2 + Math.random() * 2,
+                        health: 100,
+                        color: 'red',
+                        direction: Math.random() * Math.PI * 2,
+                        shootCooldown: Math.random() * 60 + 30,
+                        damage: 10,
+                    };
+                    enemies.push(enemy);
+                }
+            }
+        }
+
+        function updateEnemies() {
+            for (let i = 0; i < enemies.length; i++) {
+                let enemy = enemies[i];
+
+                enemy.x += Math.cos(enemy.direction) * enemy.speed;
+                enemy.y += Math.sin(enemy.direction) * enemy.speed;
+
+                if (enemy.x < 0 || enemy.x > canvas.width) enemy.direction = Math.PI - enemy.direction;
+                if (enemy.y < 0 || enemy.y > canvas.height) enemy.direction = -enemy.direction;
+
+                if (enemy.shootCooldown <= 0) {
+                    let bullet = {
+                        x: enemy.x + enemy.width / 2,
+                        y: enemy.y + enemy.height / 2,
+                        radius: 8,
+                        speed: 6,
+                        angle: Math.atan2(tank.y - enemy.y, tank.x - enemy.x),
+                        damage: enemy.damage,
+                    };
+                    bullets.push(bullet);
+                    enemy.shootCooldown = Math.random() * 60 + 30;
+                }
+
+                enemy.shootCooldown--;
+
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            }
+        }
+
+        function detectCollisions() {
+            for (let i = 0; i < enemies.length; i++) {
+                let enemy = enemies[i];
+                let distance = Math.hypot(tank.x - enemy.x, tank.y - enemy.y);
+
+                if (distance < (tank.width / 2 + enemy.width / 2)) {
+                    tank.health -= enemy.damage;
+                }
+            }
+
+            for (let i = 0; i < bullets.length; i++) {
+                for (let j = 0; j < enemies.length; j++) {
+                    let bullet = bullets[i];
+                    let enemy = enemies[j];
+                    if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+                        bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+
+                        if (bullet.damage === 100) {
+                            enemy.health -= bullet.damage;
+                        }
+
+                        if (enemy.health <= 0) {
+                            explosions.push({ x: enemy.x, y: enemy.y, size: 20 });
+                            enemies.splice(j, 1);
+                            coins += 5;
+                            localStorage.setItem('coins', coins);
+                            i--;
+                        }
+                        bullets.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        function drawExplosions() {
+            for (let i = 0; i < explosions.length; i++) {
+                let explosion = explosions[i];
+                ctx.beginPath();
+                ctx.arc(explosion.x, explosion.y, explosion.size, 0, Math.PI * 2);
+                ctx.fillStyle = 'yellow';
+                ctx.fill();
+                explosion.size += 2;
+                if (explosion.size > 40) {
+                    explosions.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+
+        function drawLevelInfo() {
+            ctx.font = "20px Arial";
+            ctx.fillStyle = 'black';
+            ctx.fillText(`Level: ${currentLevel}`, 10, 30);
+            ctx.fillText(`Enemies Left: ${enemies.length}`, canvas.width - 150, 30);
+            ctx.fillText(`Player Health: ${tank.health}`, 10, 60);
+            ctx.fillText(`Coins: ${coins}`, canvas.width - 150, 60);
+        }
+
+        function drawTankStats() {
+            ctx.font = "20px Arial";
+            ctx.fillStyle = 'black';
+            ctx.fillText(`Speed: ${tankUpgrades.speed}`, 10, 90);
+            ctx.fillText(`Health: ${tankUpgrades.health}`, 10, 120);
+            ctx.fillText(`Damage: ${tankUpgrades.damage}`, 10, 150);
+        }
+
+        function checkLevelCompletion() {
+            if (enemies.length === 0 && !levelComplete) {
+                levelComplete = true;
+                setTimeout(() => {
+                    currentLevel++;
+                    levelEnemyCount += 2;
+                    enemies = [];
+                    coins += 10;
+                    localStorage.setItem('coins', coins);
+                    levelComplete = false;
+                }, 1000);
+            }
+        }
+
+        function drawDeathScreen() {
+            ctx.fillStyle = 'black';
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
+
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('Game Over', canvas.width / 2 - 75, canvas.height / 2 - 40);
+
+            ctx.font = '20px Arial';
+            ctx.fillText('You died!', canvas.width / 2 - 50, canvas.height / 2);
+            ctx.fillText(`Coins: ${coins}`, canvas.width / 2 - 50, canvas.height / 2 + 40);
+
+            ctx.fillText('Click to return to the main menu', canvas.width / 2 - 130, canvas.height / 2 + 80);
+        }
+
+        function drawMainMenu() {
+            ctx.fillStyle = 'black';
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
+
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('ToasterStrudles Tank Game', canvas.width / 2 - 195, canvas.height / 2 - 80);
+
+            ctx.font = '20px Arial';
+            ctx.fillText('Start Game', canvas.width / 2 - 60, canvas.height / 2 - 40);
+            ctx.fillText('Upgrades', canvas.width / 2 - 60, canvas.height / 2);
+            ctx.fillText('Exit', canvas.width / 2 - 60, canvas.height / 2 + 40);
+            ctx.fillText('Refresh', canvas.width / 2 - 60, canvas.height / 2 + 80);
+        }
+
+        function drawUpgradeMenu() {
+            ctx.fillStyle = 'black';
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
+
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('Upgrade Menu', canvas.width / 2 - 75, canvas.height / 2 - 80);
+
+            ctx.font = '20px Arial';
+            ctx.fillText(`Speed: ${tankUpgrades.speed} (Cost: 10)`, canvas.width / 2 - 130, canvas.height / 2 - 40);
+            ctx.fillText(`Health: ${tankUpgrades.health} (Cost: 15)`, canvas.width / 2 - 130, canvas.height / 2);
+            ctx.fillText(`Damage: ${tankUpgrades.damage} (Cost: 20)`, canvas.width / 2 - 130, canvas.height / 2 + 40);
+
+            ctx.fillText('Back to Main Menu', canvas.width / 2 - 130, canvas.height / 2 + 80);
+        }
+
+        canvas.addEventListener('click', (e) => {
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+
+            if (gameState === 'menu') {
+                if (mouseX >= canvas.width / 2 - 60 && mouseX <= canvas.width / 2 + 60 &&
+                    mouseY >= canvas.height / 2 - 40 && mouseY <= canvas.height / 2 - 10) {
+                    gameState = 'game';
+                }
+                if (mouseX >= canvas.width / 2 - 60 && mouseX <= canvas.width / 2 + 60 &&
+                    mouseY >= canvas.height / 2 && mouseY <= canvas.height / 2 + 30) {
+                    gameState = 'upgrades';
+                }
+                if (mouseX >= canvas.width / 2 - 60 && mouseX <= canvas.width / 2 + 60 &&
+                    mouseY >= canvas.height / 2 + 40 && mouseY <= canvas.height / 2 + 70) {
+                    window.location.reload();
+                }
+            } else if (gameState === 'upgrades') {
+                if (mouseX >= canvas.width / 2 - 130 && mouseX <= canvas.width / 2 - 30 &&
+                    mouseY >= canvas.height / 2 - 40 && mouseY <= canvas.height / 2 - 10) {
+                    if (coins >= 10) {
+                        coins -= 10;
+                        tankUpgrades.speed += 1;
+                        localStorage.setItem('coins', coins);
+                    }
+                }
+                if (mouseX >= canvas.width / 2 - 130 && mouseX <= canvas.width / 2 - 30 &&
+                    mouseY >= canvas.height / 2 && mouseY <= canvas.height / 2 + 30) {
+                    if (coins >= 15) {
+                        coins -= 15;
+                        tankUpgrades.health += 10;
+                        localStorage.setItem('coins', coins);
+                    }
+                }
+                if (mouseX >= canvas.width / 2 - 130 && mouseX <= canvas.width / 2 - 30 &&
+                    mouseY >= canvas.height / 2 + 40 && mouseY <= canvas.height / 2 + 70) {
+                    if (coins >= 20) {
+                        coins -= 20;
+                        tankUpgrades.damage += 10;
+                        localStorage.setItem('coins', coins);
+                    }
+                }
+                if (mouseX >= canvas.width / 2 - 130 && mouseX <= canvas.width / 2 + 130 &&
+                    mouseY >= canvas.height / 2 + 80 && mouseY <= canvas.height / 2 + 120) {
+                    gameState = 'menu';
+                }
+            }
+        });
+
+        function mainGameLoop() {
+            const now = Date.now();
+            const deltaTime = (now - lastUpdateTime) / 1000;
+            lastUpdateTime = now;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'game') {
+                updateTank();
+                shootBullet();
+                createEnemies();
+                updateEnemies();
+                detectCollisions();
+                drawTank();
+                drawExplosions();
+                drawLevelInfo();
+                checkLevelCompletion();
+            }
+
+            if (gameState === 'menu') {
+                drawMainMenu();
+            }
+
+            if (gameState === 'upgrades') {
+                drawUpgradeMenu();
+            }
+
+            if (tank.health <= 0) {
+                gameState = 'menu';
+                tank.health = 100;
+                enemies = [];
+            }
+
+            requestAnimationFrame(mainGameLoop);
+        }
+
+        mainGameLoop();
+    </script>
+</body>
+</html>
