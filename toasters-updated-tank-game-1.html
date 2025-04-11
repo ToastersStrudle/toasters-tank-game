@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToasterStrudles Tank Game</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+      font-family: Arial, sans-serif;
+    }
+    
+    canvas {
+      border: 2px solid #333;
+      background-color: #fff;
+    }
+    
+    .game-container {
+      text-align: center;
+    }
+    
+    h1 {
+      color: #333;
+    }
+    
+    .instructions {
+      margin: 20px 0;
+      text-align: left;
+      background-color: #eee;
+      padding: 10px;
+      border-radius: 5px;
+      max-width: 800px;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <h1>ToasterStrudles Tank Game</h1>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div class="instructions">
+      <p><strong>Controls:</strong></p>
+      <ul>
+        <li>Arrow keys or WASD: Move/Rotate tank</li>
+        <li>Space: Shoot</li>
+        <li>F: Toggle fullscreen</li>
+      </ul>
+      <p>Collect health packs and defeat enemies to earn coins. Use coins to upgrade your tank!</p>
+      <p>i also will be adding more to this game =)</p>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Game states
+    const GAME_STATE = {
+      MENU: "menu",
+      GAME: "game",
+      UPGRADES: "upgrades",
+      GAME_OVER: "gameOver"
+    };
+
+    // Configuration
+    const CONFIG = {
+      HEALTH_PACK_SPAWN_COOLDOWN: 600, // 10 seconds at 60fps
+      SHOOT_COOLDOWN: 60,              // 1 second at 60fps
+      LEVEL_COMPLETE_DELAY: 1000,      // 1 second
+      GAME_OVER_DELAY: 2000,           // 2 seconds
+      FULLSCREEN_BORDER_WIDTH: 10,     // Border width when in fullscreen
+      FULLSCREEN_BORDER_COLOR: 'gold'  // Border color when in fullscreen
+    };
+
+    // Initialize game state
+    let gameState = GAME_STATE.MENU;
+    let currentLevel = 1;
+    let levelEnemyCount = 2;
+    let levelComplete = false;
+    let lastUpdateTime = Date.now();
+    let isFullScreen = false;
+
+    // Initialize player data
+    let coins = parseInt(localStorage.getItem('coins')) || 0;
+
+    // Tank upgrades
+    let tankUpgrades = {
+      speed: 5,
+      health: 100,
+      damage: 100
+    };
+
+    // Tank object
+    let tank = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      width: 50,
+      height: 50,
+      speed: tankUpgrades.speed,     // Use the upgrade value
+      color: 'green',
+      health: tankUpgrades.health,   // Use the upgrade value
+      maxHealth: tankUpgrades.health, // Track max health separately
+      direction: 0,
+      turretAngle: 0,
+      shootCooldown: 0,
+      turretLength: 20,
+      rotationSpeed: 0.05,
+      armor: 0
+    };
+
+    // Game objects
+    let bullets = [];
+    let enemies = [];
+    let explosions = [];
+    let healthPacks = [];
+    let healthPackSpawnCooldown = CONFIG.HEALTH_PACK_SPAWN_COOLDOWN;
+
+    // Input handling
+    let keys = { left: false, up: false, right: false, down: false, shoot: false };
+
+    document.addEventListener("keydown", (e) => {
+      switch (e.key) {
+        case "ArrowLeft":
+        case "a":
+        case "A":  
+          keys.left = true; 
+          break;
+        case "ArrowUp":
+        case "w":
+        case "W":    
+          keys.up = true; 
+          break;
+        case "ArrowRight":
+        case "d": 
+        case "D": 
+          keys.right = true; 
+          break;
+        case "ArrowDown":
+        case "s":
+        case "S":  
+          keys.down = true; 
+          break;
+        case " ":          
+          keys.shoot = true; 
+          break;
+        case "f":          
+        case "F":
+          if (!['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && 
+              !document.activeElement.isContentEditable) {
+            e.preventDefault();
+            toggleFullScreen();
+          }
+          break;
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      switch (e.key) {
+        case "ArrowLeft":
+        case "a":
+        case "A":  
+          keys.left = false; 
+          break;
+        case "ArrowUp":
+        case "w":
+        case "W":    
+          keys.up = false; 
+          break;
+        case "ArrowRight":
+        case "d":
+        case "D": 
+          keys.right = false; 
+          break;
+        case "ArrowDown":
+        case "s":
+        case "S":  
+          keys.down = false; 
+          break;
+        case " ":          
+          keys.shoot = false; 
+          break;
+      }
+    });
+
+    // Fullscreen toggle function
+    function toggleFullScreen() {
+      if (!document.fullscreenElement) {
+        // Enter fullscreen
+        if (canvas.requestFullscreen) {
+          canvas.requestFullscreen();
+        } else if (canvas.mozRequestFullScreen) { // Firefox
+          canvas.mozRequestFullScreen();
+        } else if (canvas.webkitRequestFullscreen) { // Chrome, Safari and Opera
+          canvas.webkitRequestFullscreen();
+        } else if (canvas.msRequestFullscreen) { // IE/Edge
+          canvas.msRequestFullscreen();
+        }
+        isFullScreen = true;
+      } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.mozCancelFullScreen) { // Firefox
+          document.mozCancelFullScreen();
+        } else if (document.webkitExitFullscreen) { // Chrome, Safari and Opera
+          document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) { // IE/Edge
+          document.msExitFullscreen();
+        }
+        isFullScreen = false;
+      }
+    }
+
+    // Update event listeners for fullscreen changes
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    function handleFullscreenChange() {
+      isFullScreen = !!document.fullscreenElement;
+      
+      // When entering fullscreen, adjust the canvas click handler to account for scaling
+      if (isFullScreen) {
+        // Remove the old click handler
+        canvas.removeEventListener('click', handleClick);
+        
+        // Add a new click handler that adjusts for scaling
+        canvas.addEventListener('click', handleFullscreenClick);
+      } else {
+        // Remove the fullscreen click handler
+        canvas.removeEventListener('click', handleFullscreenClick);
+        
+        // Restore the original click handler
+        canvas.addEventListener('click', handleClick);
+      }
+    }
+
+    // Click handling for normal mode
+    canvas.addEventListener('click', handleClick);
+
+    // Click handling for fullscreen mode
+    function handleFullscreenClick(e) {
+      // Calculate the scaling factors
+      const scaleX = canvas.width / canvas.offsetWidth;
+      const scaleY = canvas.height / canvas.offsetHeight;
+      
+      // Adjust the click coordinates based on scaling
+      const adjustedX = e.offsetX * scaleX;
+      const adjustedY = e.offsetY * scaleY;
+      
+      // Handle the click with adjusted coordinates
+      switch (gameState) {
+        case GAME_STATE.MENU:
+          handleMenuClick(adjustedX, adjustedY);
+          break;
+        case GAME_STATE.UPGRADES:
+          handleUpgradesClick(adjustedX, adjustedY);
+          break;
+        case GAME_STATE.GAME_OVER:
+          handleGameOverClick(adjustedX, adjustedY);
+          break;
+      }
+    }
+
+    // ==================== Player Functions ====================
+
+    function updateTank() {
+      // Update tank properties based on upgrades (in case they changed)
+      tank.speed = tankUpgrades.speed;
+      tank.maxHealth = tankUpgrades.health;
+
+      // Movement - use the upgraded speed
+      if (keys.left) tank.x -= tank.speed;
+      if (keys.up) tank.y -= tank.speed;
+      if (keys.right) tank.x += tank.speed;
+      if (keys.down) tank.y += tank.speed;
+
+      // Turret rotation
+      if (keys.right) tank.turretAngle += tank.rotationSpeed;
+      if (keys.left) tank.turretAngle -= tank.rotationSpeed;
+
+      // Keep tank within canvas bounds
+      tank.x = Math.max(0, Math.min(tank.x, canvas.width - tank.width));
+      tank.y = Math.max(0, Math.min(tank.y, canvas.height - tank.height));
+
+      // Decrease shoot cooldown
+      if (tank.shootCooldown > 0) {
+        tank.shootCooldown--;
+      }
+    }
+
+    function drawTank() {
+      ctx.save();
+      ctx.translate(tank.x + tank.width / 2, tank.y + tank.height / 2);
+      ctx.rotate(tank.turretAngle);
+
+      // Draw tank body
+      ctx.fillStyle = tank.color;
+      ctx.fillRect(-tank.width / 2, -tank.height / 2, tank.width, tank.height);
+
+      // Draw tank turret
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, -5, tank.turretLength, 10);
+
+      ctx.restore();
+
+      // Draw health bar
+      drawHealthBar();
+    }
+
+    function drawHealthBar() {
+      const barWidth = 50;
+      const barHeight = 5;
+      const healthPercentage = tank.health / tank.maxHealth;
+
+      ctx.fillStyle = 'red';
+      ctx.fillRect(tank.x, tank.y - 10, barWidth, barHeight);
+
+      ctx.fillStyle = 'green';
+      ctx.fillRect(tank.x, tank.y - 10, barWidth * healthPercentage, barHeight);
+    }
+
+    function shootBullet() {
+      if (keys.shoot && tank.shootCooldown <= 0) {
+        bullets.push({
+          x: tank.x + tank.width / 2,
+          y: tank.y + tank.height / 2,
+          radius: 5,
+          speed: 7,
+          angle: tank.turretAngle,
+          damage: tankUpgrades.damage  // Use the upgraded damage
+        });
+
+        tank.shootCooldown = CONFIG.SHOOT_COOLDOWN;
+      }
+    }
+
+    // ==================== Bullet Functions ====================
+
+    function updateBullets() {
+      for (let i = 0; i < bullets.length; i++) {
+        const bullet = bullets[i];
+
+        // Update position
+        bullet.x += Math.cos(bullet.angle) * bullet.speed;
+        bullet.y += Math.sin(bullet.angle) * bullet.speed;
+
+        // Draw bullet
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'black';
+        ctx.fill();
+        ctx.closePath();
+
+        // Remove bullets that are out of bounds
+        if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+          bullets.splice(i, 1);
+          i--;
+        }
+      }
+    }
+
+    // ==================== Enemy Functions ====================
+
+    function createEnemies() {
+      if (enemies.length === 0 && !levelComplete) {
+        for (let i = 0; i < levelEnemyCount; i++) {
+          enemies.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            width: 50,
+            height: 50,
+            speed: 2 + Math.random() * 2,
+            health: 100,
+            color: 'red',
+            direction: Math.random() * Math.PI * 2,
+            shootCooldown: Math.random() * 60 + 30,
+            damage: 1
+          });
+        }
+      }
+    }
+
+    function updateEnemies() {
+      for (let i = 0; i < enemies.length; i++) {
+        const enemy = enemies[i];
+
+        // Calculate angle to player
+        const angleToPlayer = Math.atan2(tank.y - enemy.y, tank.x - enemy.x);
+
+        // Move enemy towards player
+        enemy.x += Math.cos(angleToPlayer) * enemy.speed;
+        enemy.y += Math.sin(angleToPlayer) * enemy.speed;
+
+        // Check collision with player
+        const distanceToPlayer = Math.hypot(tank.x - enemy.x, tank.y - enemy.y);
+        if (distanceToPlayer < (tank.width / 2 + enemy.width / 2)) {
+          tank.health -= enemy.damage;
+        }
+
+        // Draw enemy
+        ctx.fillStyle = enemy.color;
+        ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+      }
+    }
+
+    // ==================== Health Pack Functions ====================
+
+    function spawnHealthPack() {
+      if (healthPackSpawnCooldown <= 0) {
+        healthPacks.push({
+          x: Math.random() * (canvas.width - 30),
+          y: Math.random() * (canvas.height - 30),
+          size: 30,
+          healAmount: 30,
+          color: 'limegreen'
+        });
+
+        healthPackSpawnCooldown = CONFIG.HEALTH_PACK_SPAWN_COOLDOWN;
+      } else {
+        healthPackSpawnCooldown--;
+      }
+    }
+
+    function drawHealthPacks() {
+      for (const pack of healthPacks) {
+        ctx.fillStyle = pack.color;
+        ctx.fillRect(pack.x, pack.y, pack.size, pack.size);
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.fillText('+', pack.x + 10, pack.y + 22);
+      }
+    }
+
+    function checkHealthPackPickup() {
+      for (let i = 0; i < healthPacks.length; i++) {
+        const pack = healthPacks[i];
+
+        if (
+          tank.x < pack.x + pack.size &&
+          tank.x + tank.width > pack.x &&
+          tank.y < pack.y + pack.size &&
+          tank.y + tank.height > pack.y
+        ) {
+          // Use maxHealth (from upgrades) to cap the healing
+          tank.health = Math.min(tank.health + pack.healAmount, tank.maxHealth);
+          healthPacks.splice(i, 1);
+          i--;
+        }
+      }
+    }
+
+    // ==================== Collision Detection ====================
+
+    function detectCollisions() {
+      // Check bullet collisions with enemies
+      for (let i = 0; i < bullets.length; i++) {
+        for (let j = 0; j < enemies.length; j++) {
+          const bullet = bullets[i];
+          const enemy = enemies[j];
+
+          if (
+            bullet.x > enemy.x && 
+            bullet.x < enemy.x + enemy.width &&
+            bullet.y > enemy.y && 
+            bullet.y < enemy.y + enemy.height
+          ) {
+            // Apply damage - use the bullet's damage which comes from tankUpgrades.damage
+            enemy.health -= bullet.damage;
+
+            // Check if enemy defeated
+            if (enemy.health <= 0) {
+              explosions.push({ x: enemy.x, y: enemy.y, size: 20 });
+              enemies.splice(j, 1);
+              coins += 5;
+              localStorage.setItem('coins', coins);
+              j--;
+            }
+
+            // Remove bullet
+            bullets.splice(i, 1);
+            i--;
+            break;
+          }
+        }
+      }
+    }
+
+    // ==================== UI Functions ====================
+
+    function drawExplosions() {
+      for (let i = 0; i < explosions.length; i++) {
+        const explosion = explosions[i];
+
+        ctx.beginPath();
+        ctx.arc(explosion.x, explosion.y, explosion.size, 0, Math.PI * 2);
+        ctx.fillStyle = 'yellow';
+        ctx.fill();
+
+        explosion.size += 2;
+        if (explosion.size > 40) {
+          explosions.splice(i, 1);
+          i--;
+        }
+      }
+    }
+
+    function drawLevelInfo() {
+      ctx.font = "20px Arial";
+      ctx.fillStyle = 'black';
+      ctx.fillText(`Level: ${currentLevel}`, 10, 30);
+      ctx.fillText(`Enemies Left: ${enemies.length}`, canvas.width - 150, 30);
+      ctx.fillText(`Player Health: ${tank.health}/${tank.maxHealth}`, 10, 60);
+      ctx.fillText(`Coins: ${coins}`, canvas.width - 150, 60);
+    }
+
+    function drawTankStats() {
+      ctx.font = "20px Arial";
+      ctx.fillStyle = 'black';
+      ctx.fillText(`Speed: ${tankUpgrades.speed}`, 10, 90);
+      ctx.fillText(`Health: ${tankUpgrades.health}`, 10, 120);
+      ctx.fillText(`Damage: ${tankUpgrades.damage}`, 10, 150);
+    }
+
+    function drawBorder() {
+      if (isFullScreen) {
+        const borderWidth = CONFIG.FULLSCREEN_BORDER_WIDTH;
+        
+        ctx.strokeStyle = CONFIG.FULLSCREEN_BORDER_COLOR;
+        ctx.lineWidth = borderWidth;
+        ctx.strokeRect(
+          borderWidth / 2, 
+          borderWidth / 2, 
+          canvas.width - borderWidth, 
+          canvas.height - borderWidth
+        );
+      }
+    }
+
+    function drawMainMenu() {
+      ctx.fillStyle = 'black';
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.fillText('ToasterStrudles Tank Game', canvas.width / 2 - 195, canvas.height / 2 - 80);
+
+      ctx.font = '20px Arial';
+      ctx.fillText('Start Game', canvas.width / 2 - 60, canvas.height / 2 - 40);
+      ctx.fillText('Upgrades', canvas.width / 2 - 60, canvas.height / 2);
+      ctx.fillText('Exit', canvas.width / 2 - 60, canvas.height / 2 + 40);
+      ctx.fillText('Refresh', canvas.width / 2 - 60, canvas.height / 2 + 80);
+      ctx.fillText('Press "F" for fullscreen', canvas.width / 2 - 90, canvas.height / 2 + 120);
+      
+      // Draw the border if in fullscreen
+      drawBorder();
+    }
+
+    function drawUpgradeMenu() {
+      ctx.fillStyle = 'black';
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.fillText('Upgrade Menu', canvas.width / 2 - 75, canvas.height / 2 - 80);
+
+      ctx.font = '20px Arial';
+      ctx.fillText(`Speed: ${tankUpgrades.speed} (Cost: 10)`, canvas.width / 2 - 130, canvas.height / 2 - 40);
+      ctx.fillText(`Health: ${tankUpgrades.health} (Cost: 15)`, canvas.width / 2 - 130, canvas.height / 2);
+      ctx.fillText(`Damage: ${tankUpgrades.damage} (Cost: 20)`, canvas.width / 2 - 130, canvas.height / 2 + 40);
+      ctx.fillText('Back to Main Menu', canvas.width / 2 - 130, canvas.height / 2 + 80);
+
+      // Show current coins
+      ctx.fillText(`Coins: ${coins}`, canvas.width / 2 - 130, canvas.height / 2 + 120);
+      ctx.fillText('Press "F" for fullscreen', canvas.width / 2 - 130, canvas.height / 2 + 160);
+      
+      // Draw the border if in fullscreen
+      drawBorder();
+    }
+
+    function drawDeathScreen() {
+      ctx.fillStyle = 'black';
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.fillText('Game Over', canvas.width / 2 - 75, canvas.height / 2 - 40);
+
+      ctx.font = '20px Arial';
+      ctx.fillText('You died!', canvas.width / 2 - 50, canvas.height / 2);
+      ctx.fillText(`Coins: ${coins}`, canvas.width / 2 - 50, canvas.height / 2 + 40);
+      ctx.fillText('Click to return to the main menu', canvas.width / 2 - 130, canvas.height / 2 + 80);
+      ctx.fillText('Press "F" for fullscreen', canvas.width / 2 - 110, canvas.height / 2 + 120);
+      
+      // Draw the border if in fullscreen
+      drawBorder();
+    }
+
+    // ==================== Game Logic Functions ====================
+
+    function checkLevelCompletion() {
+      if (enemies.length === 0 && !levelComplete) {
+        levelComplete = true;
+        setTimeout(() => {
+          currentLevel++;
+          levelEnemyCount += 2;
+          enemies = [];
+          coins += 10;
+          localStorage.setItem('coins', coins);
+          levelComplete = false;
+        }, CONFIG.LEVEL_COMPLETE_DELAY);
+      }
+    }
+
+    function resetLevel() {
+      // Reset position
+      tank.x = canvas.width / 2;
+      tank.y = canvas.height / 2;
+
+      // Set health to current max health (from upgrades)
+      tank.health = tank.maxHealth;
+
+      enemies = [];
+      levelComplete = false;
+      levelEnemyCount = 2;
+    }
+
+    function handleClick(e) {
+      const mouseX = e.offsetX;
+      const mouseY = e.offsetY;
+
+      switch (gameState) {
+        case GAME_STATE.MENU:
+          handleMenuClick(mouseX, mouseY);
+          break;
+        case GAME_STATE.UPGRADES:
+          handleUpgradesClick(mouseX, mouseY);
+          break;
+        case GAME_STATE.GAME_OVER:
+          handleGameOverClick(mouseX, mouseY);
+          break;
+      }
+    }
+
+    function handleMenuClick(mouseX, mouseY) {
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      // Start Game button
+      if (isInRect(mouseX, mouseY, centerX - 60, centerY - 40, 120, 30)) {
+        gameState = GAME_STATE.GAME;
+        // Make sure tank has the correct stats when starting the game
+        resetLevel();
+      }
+      // Upgrades button
+      else if (isInRect(mouseX, mouseY, centerX - 60, centerY, 120, 30)) {
+        gameState = GAME_STATE.UPGRADES;
+      }
+      // Exit button
+      else if (isInRect(mouseX, mouseY, centerX - 60, centerY + 40, 120, 30)) {
+        window.close();
+      }
+      // Refresh button
+      else if (isInRect(mouseX, mouseY, centerX - 60, centerY + 80, 120, 30)) {
+        location.reload();
+      }
+    }
+
+    function handleUpgradesClick(mouseX, mouseY) {
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      // Speed upgrade
+      if (isInRect(mouseX, mouseY, centerX - 130, centerY - 40, 260, 30)) {
+        if (coins >= 10) {
+          tankUpgrades.speed += 1;  // Smaller increment to avoid making it too easy
+          coins -= 10;
+          localStorage.setItem('coins', coins);
+
+          // Apply speed upgrade immediately
+          tank.speed = tankUpgrades.speed;
+        }
+      }
+      // Health upgrade
+      else if (isInRect(mouseX, mouseY, centerX - 130, centerY, 260, 30)) {
+        if (coins >= 15) {
+          tankUpgrades.health += 20;
+          coins -= 15;
+          localStorage.setItem('coins', coins);
+
+          // Apply health upgrade immediately
+          tank.maxHealth = tankUpgrades.health;
+          tank.health = tank.maxHealth;  // Heal to full when upgrading health
+        }
+      }
+      // Damage upgrade
+      else if (isInRect(mouseX, mouseY, centerX - 130, centerY + 40, 260, 30)) {
+        if (coins >= 20) {
+          tankUpgrades.damage += 10;
+          coins -= 20;
+          localStorage.setItem('coins', coins);
+
+          // Damage is applied when bullets are created, so no need to update here
+        }
+      }
+      // Back button
+      else if (isInRect(mouseX, mouseY, centerX - 130, centerY + 80, 260, 30)) {
+        gameState = GAME_STATE.MENU;
+      }
+    }
+
+    function handleGameOverClick(mouseX, mouseY) {
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      if (isInRect(mouseX, mouseY, centerX - 130, centerY + 80, 260, 30)) {
+        gameState = GAME_STATE.MENU;
+        resetLevel();
+      }
+    }
+
+    // Helper function to check if a point is in a rectangle
+    function isInRect(x, y, rectX, rectY, rectWidth, rectHeight) {
+      return x >= rectX && x <= rectX + rectWidth && y >= rectY && y <= rectY + rectHeight;
+    }
+
+    // ==================== Main Game Loop ====================
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      switch (gameState) {
+        case GAME_STATE.GAME:
+          updateGame();
+          break;
+        case GAME_STATE.MENU:
+          drawMainMenu();
+          break;
+        case GAME_STATE.UPGRADES:
+          drawUpgradeMenu();
+          break;
+        case GAME_STATE.GAME_OVER:
+          drawDeathScreen();
+          break;
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function updateGame() {
+      let now = Date.now();
+      let deltaTime = (now - lastUpdateTime) / 1000;
+      lastUpdateTime = now;
+
+      // Update game objects
+      updateTank();
+      shootBullet();
+      updateBullets();
+      createEnemies();
+      updateEnemies();
+      detectCollisions();
+      spawnHealthPack();
+      drawHealthPacks();
+      checkHealthPackPickup();
+
+      // Draw game elements
+      drawTank();
+      drawExplosions();
+      drawLevelInfo();
+      drawTankStats();
+      
+      // Draw the border if in fullscreen
+      drawBorder();
+
+      // Check game status
+      checkLevelCompletion();
+
+      // Check if player is dead
+      if (tank.health <= 0) {
+        gameState = GAME_STATE.GAME_OVER;
+        setTimeout(() => {
+          resetLevel();
+          gameState = GAME_STATE.MENU;
+        }, CONFIG.GAME_OVER_DELAY);
+      }
+    }
+
+    // Start the game
+    gameLoop();
+  </script>
+</body>
+</html>
